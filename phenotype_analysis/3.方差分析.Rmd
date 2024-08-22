@@ -1,0 +1,136 @@
+
+# 1. 表型描述性统计量
+
+```{r}
+#install.packages("readxl")
+install.packages("agricolae")
+#library(readxl)
+library(agricolae)
+# trait10 <- read_excel("bean_phenotype-2017.12.3-20180623.xls",sheet = "trait10",col_types = "numeric",na = "NA")
+# trait10.1 <- as.matrix(trait10[,-1])
+
+trait10 <- read.table("sumSASsum/bean/trait16.txt",header = T,na = ".")
+trait10.1 <- trait10$Trait
+range(trait10.1,na.rm = TRUE)
+mean(trait10.1,na.rm = TRUE)
+sd(trait10.1,na.rm = TRUE)
+skewness(trait10.1)
+kurtosis(trait10.1)
+```
+
+# 2. SAS计算方差
+
+### 2.1 import phenotype data
+
+
+x "dir G:\sumSASsum\bean\*.txt /b > G:\sumSASsum\all.txt"; #### cmd dir G:\sumSASsum\bean\*.txt /b > G:\sumSASsum\all.txt
+%macro daoru(name) ;                                
+PROC IMPORT OUT= WORK.&name                        
+            DATAFILE= "G:\sumSASsum\bean\&name..txt" replace ;
+            GETNAMES=YES;                                   
+RUN;
+%mend;
+data _null_;
+        infile "G:\sumSASsum\all.txt";
+        input str:$100.;
+        call execute(compress('%daoru('||scan(str,1,'.')||');')); 
+run; 
+
+### 2.2  GLM loop
+
+data para_list;
+   input DTNAME $32.;
+   datalines;
+   Trait2
+   Trait3
+   Trait4
+   Trait6
+   Trait7
+   Trait8
+   Trait9
+   Trait10
+   Trait11
+   Trait12
+   Trait13
+   Trait14
+   Trait15
+   Trait16
+   Trait17
+run;
+
+%macro LoopGLM;
+   proc sql noprint;
+    select count(*) into :para_count
+        from para_list
+        ;
+        quit;
+        
+        %do i=1 %to &para_count;
+         data _null_;
+         set para_list(firstobs=&i. obs=&i.);
+         call symput("DT",strip(DTNAME));
+         run;
+
+         proc glm data=&DT.;
+         class Env Taxa; 
+         model Trait = Env Taxa;
+         random Env Taxa /test;
+         title "&i GLM random";
+         run;
+
+         
+         %end;
+ %mend;
+ %loopglm;
+
+### 2.3 varcomp loop
+
+
+data para_list;
+   input DTNAME $32.;
+   datalines;
+   Trait2
+   Trait3
+   Trait4
+   Trait6
+   Trait7
+   Trait8
+   Trait9
+   Trait10
+   Trait11
+   Trait12
+   Trait13
+   Trait14
+   Trait15
+   Trait16
+   Trait17
+run;
+
+%macro LoopVarcomp;
+   proc sql noprint;
+    select count(*) into :para_count
+        from para_list
+        ;
+        quit;
+        
+        %do i=1 %to &para_count;
+         data _null_;
+         set para_list(firstobs=&i. obs=&i.);
+         call symput("DT",strip(DTNAME));
+         run;
+
+         proc varcomp data=&DT. method= REML;
+         class Env Taxa; 
+         model Trait = Env Taxa;
+         title "&i varcomp ";
+         run;
+
+
+         
+         %end;
+ %mend;
+ %loopvarcomp;
+
+
+
+

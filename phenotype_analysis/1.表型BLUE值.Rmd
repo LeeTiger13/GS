@@ -1,0 +1,162 @@
+---
+title: 'Phenotype: Clean data'
+author: "Wang Xiaoli"
+date: "2020/9/22"
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+Data cleaning is the process of improving data quality by processing missing values, smoothing noise data, identifying and deleting discrete values, etc.
+
+# Step 1. Filtering missing value and outliers 
+缺失值过滤、异常值剔除
+
+Filter missing value
+Keeping phenotype data with biological repeats greater than or equal to 3 in each year
+
+Remove outliers
+1. Calculating the average phenotype of each material in each year
+2. Calculating the average and standard deviation of population phenotype based on step1 number in three years
+3. If the difference between the average phenotype of each material in each year and the average phenotype of the population is greater than 3 times the standard deviation, the phenotype value of this material in that year is regarded as an outlier, and then outlier is filtered out
+4. Constructing a long table containing 4 variables including material, year (batch), biological replicate, and original phenotype value for subsequent calculation of phenotype BLUE value by lme4 package
+
+Input file
+An EXCEL table contains one trait, and different workbooks in this table contain the phenotype value of this trait in different years (batch), such as the file Ear Biomass.xlsx
+Output file
+A table with 4 variables including material, year (batch), biological replicate, and original phenotype value. Notably, Ws and ww are put into two data respectively, such as EarBiomass.ws.filtered.csv and EarBiomass.ww.filtered .csv
+
+缺失值过滤：
+保留单年中生物学重复大于或等于3的材料数据
+
+异常值剔除：
+1）根据生物学重复计算单年单个材料表型平均值
+2）根据三年中所有材料的表型计算群体表型平均值和群体表型标准差
+3）如果单年单个材料表型平均值与群体表型平均值之差大于3倍的标准差，则视该年该材料的表型值为离群值，过滤掉离群值
+4）构建包含材料、年份（批次）、生物学重复、原始表型值共4个变量的长表格，以供后续lme4进行材料BLUE值的计算
+
+输入文件：
+一个EXCEL表格放一个性状，该表格中不同的工作簿分别放不同年份（批次）的该性状表型值，如Ear Biomass.xlsx
+输出文件：
+含有材料、年份（批次）、生物学重复、原始表型值共4个变量的长表格，ws和ww分别放到两个数据中，如EarBiomass.ws.filtered.csv和EarBiomass.ww.filtered.csv
+
+```{r eval=FALSE}
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(reshape2)
+# library(writexl)
+path = "~/Input/Ear Biomass.xlsx"
+df <- map_dfr(excel_sheets(path), ~ read_xlsx(path, sheet = .x)) #对工作簿的内容进行批量读取，并按行堆叠合并
+df[1:522,"Batch"]<- "First"
+df[523:1044,"Batch"]<- "Second"
+df[1045:1566,"Batch"]<- "Third"
+ws <- filter(df,Treat == "WS")
+ww <- filter(df,Treat == "WW")
+ww$Line <- ws$Line
+
+if(nrow(ws)==nrow(ww)){
+  NumLines <- nrow(ws)
+  
+  for (i in 1:NumLines) {
+    ws[i,"NumMissing"] <- sum(is.na(ws[i,3:9]))
+    ws[i,"PH"] <- round(mean(as.numeric(ws[i,3:9]),na.rm = TRUE),2)
+    ww[i,"NumMissing"] <- sum(is.na(ww[i,3:9]))
+    ww[i,"PH"] <- round(mean(as.numeric(ww[i,3:9]),na.rm = TRUE),2)
+  }
+  
+  ws.remain <- ws[which(ws$NumMissing<=(7-3)),] # 至少3个生物学重复
+  Mean_ws <- mean(ws.remain$PH)
+  Q1_ws<-quantile(ws.remain$PH)[2]
+  Q3_ws<-quantile(ws.remain$PH)[4]
+  IQR_ws <- Q3_ws-Q1_ws
+  ws.remain$outlier <- ifelse((Q1_ws-1.5*IQR_ws <= ws.remain$PH & ws.remain$PH <= Q3_ws+ 1.5* IQR_ws),0,1)
+  ws.remain2 <- ws.remain[which(ws.remain$outlier==0),]
+  ws.remain3 <- separate(data = ws.remain2, col = Line, into = c("Lines", "Years"), sep = " +")
+  ws.remain3$Y1 <- sub('^.','',ws.remain3$Years)
+  ws.remain3$Year <- sub('.$','',ws.remain3$Y1)
+  ####################################
+  # ws.filtered <- ws.remain3[,c("Lines","Batch","1" ,"2","3","4","5","6","7","PH")]
+  # colnames(ws.filtered) <- c("Lines","Batch","Rep1" ,"Rep2","Rep3","Rep4","Rep5","Rep6","Rep7","PH")
+  ws.filtered <- ws.remain3[,c("Lines","Batch","1" ,"2","3","4","5","6","7")]
+  colnames(ws.filtered) <- c("Lines","Batch","Rep1" ,"Rep2","Rep3","Rep4","Rep5","Rep6","Rep7")
+  ws.tmp <- melt(ws.filtered,id.vars = c("Lines","Batch"),variable.name = "Rep", 
+  value.name = "PH")
+  ws.tmp <- ws.tmp[!is.na(ws.tmp$PH),]
+  ####################################
+  write.table(ws.tmp,"~/Output/EarBiomass.ws.filtered.csv",quote = F,row.names = F)
+  write.table(ws.filtered,"~/Output/EarBiomass.ws.filtered.tmp.csv",quote = F,row.names = F)
+    
+  ww.remain <- ww[which(ww$NumMissing<=(7-3)),]
+  Mean_ww <- mean(ww.remain$PH);
+  Q1_ww<-quantile(ww.remain$PH)[2]
+  Q3_ww<-quantile(ww.remain$PH)[4]
+  IQR_ww <- Q3_ww-Q1_ww
+  ww.remain$outlier <- ifelse((Q1_ww-1.5*IQR_ww <= ww.remain$PH & ww.remain$PH <= Q3_ww+ 1.5* IQR_ww),0,1)
+  ww.remain2 <- ww.remain[which(ww.remain$outlier==0),]
+  ww.remain3 <- separate(data = ww.remain2, col = Line, into = c("Lines", "Years"), sep = " +")
+  ww.remain3$Y1 <- sub('^.','',ww.remain3$Years)
+  ww.remain3$Year <- sub('.$','',ww.remain3$Y1)
+  ####################################
+  # ww.filtered <- ww.remain3[,c("Lines","Batch","1" ,"2","3","4","5","6","7","PH")]
+  # colnames(ww.filtered) <- c("Lines","Batch","Rep1" ,"Rep2","Rep3","Rep4","Rep5","Rep6","Rep7","PH")
+  ww.filtered <- ww.remain3[,c("Lines","Batch","1" ,"2","3","4","5","6","7")]
+  colnames(ww.filtered) <- c("Lines","Batch","Rep1" ,"Rep2","Rep3","Rep4","Rep5","Rep6","Rep7")
+  ww.tmp <- melt(ww.filtered,id.vars = c("Lines","Batch"),variable.name = "Rep", 
+  value.name = "PH")
+  ww.tmp <- ww.tmp[!is.na(ww.tmp$PH),]
+  ####################################
+  write.table(ww.tmp,"~/Output/EarBiomass.ww.filtered.csv",quote = F,row.names = F)
+  write.table(ww.filtered,"~/Output/EarBiomass.ww.filtered.tmp.csv",quote = F,row.names = F)
+}
+```
+
+
+
+# Step 2. Calculating the BLUE of Phenotype
+
+BLUE: Best Linear Unbiased Evaluation
+R package: lmer4
+Linear model: PH ~ Lines + (1|Batch) + (1|Rep) 
+
+Input file
+A long table with 4 variables including material, year (batch), biological replicate, and original phenotype value. Notably, Ws and ww are put into two data respectively, such as EarBiomass.ws.filtered.csv and EarBiomass.ww.filtered .csv
+Output file
+A result file containing two columns of material and BLUE value, such as EarBiomass.ws.BLUE.txt
+
+模型：PH ~ Lines + (1|Batch) + (1|Rep)
+
+输入文件：
+含有材料、年份（批次）、生物学重复、原始表型值共4个变量的长表格，ws和ww分别放到两个数据中，如EarBiomass.ws.filtered.csv和EarBiomass.ww.filtered.csv
+输出文件：
+含有材料和BLUE值的结果文件，如EarBiomass.ws.BLUE.txt
+
+
+```{r eval=FALSE}
+library(lme4)
+data.list <- dir(path="~/Output/",pattern = ".filtered.csv$")
+for(i in 1:length(data.list)){
+  fileName <- sub('.............$','',data.list[i])
+  data <- read.csv(data.list[i],sep = " ")
+  
+  data.mod <- lmer(PH ~ Lines + (1|Batch) + (1|Rep) ,data)
+  
+  data.summary <- summary(data.mod)
+  data.estimate <- data.summary[[10]]; nrow(data.estimate)
+  data.blue <- data.frame(as.matrix(NA,ncol=1,nrow=116),stringsAsFactors = F)
+  data.blue[1,1] <- data.estimate[1,1]
+  data.blue[2:nrow(data.estimate),1] <- data.estimate[2:nrow(data.estimate),1]+data.estimate[1,1]
+  LineName <- sub('^.....','',rownames(data.estimate))
+  data.result <- data.frame(cbind(LineName,round(data.blue[,1],2)),stringsAsFactors = F)
+  data.result[1,1] <- as.character(data[1,1])
+  colnames(data.result)[2] <- paste0("BLUE.",fileName)
+  png(paste0("~/Output/",fileName,".BLUE.png"))
+  hist(as.numeric(data.result[,2]),main = paste0(fileName,".BLUE"),xlab =  paste0(fileName,".BLUE"))
+  dev.off()
+  write.table(data.result,paste0("~/Output/",fileName,".BLUE.txt"),sep = "\t",quote = F,row.names = F)
+  print(i)
+}
+```
+
